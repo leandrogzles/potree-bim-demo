@@ -1139,6 +1139,271 @@ app.get('/assets/models/:urn.glb', async (_req: Request, res: Response) => {
   });
 });
 
+// ============================================================================
+// Mock Properties Endpoint (ENTREGA 2 - Enhanced with cache and richer data)
+// Provides deterministic fake properties based on selection key hash
+// This will be replaced by real APS properties.db later
+// ============================================================================
+
+function simpleHash(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash);
+}
+
+function seededRandom(seed: number): () => number {
+  return function() {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+}
+
+interface MockPropertiesResponse {
+  element: {
+    key: string;
+    name: string;
+    pseudoDbId: number;
+    externalId: string;
+  };
+  source: 'mock';
+  units: 'm';
+  cachedAt: string;
+  groups: Array<{
+    group: string;
+    expanded: boolean;
+    props: Array<{ name: string; value: string; type?: string }>;
+  }>;
+}
+
+const mockPropertiesCache = new Map<string, MockPropertiesResponse>();
+
+function generateMockProperties(key: string, name: string): MockPropertiesResponse {
+  const seed = simpleHash(key);
+  const random = seededRandom(seed);
+  const pseudoDbId = seed % 1000000;
+  const externalId = `ext-${seed.toString(16).padStart(8, '0')}`;
+
+  const categories = ['Walls', 'Doors', 'Windows', 'Floors', 'Structural Columns', 'Structural Framing', 'Ceilings', 'Roofs', 'Stairs', 'Railings', 'Casework', 'Generic Models'];
+  const category = categories[Math.floor(random() * categories.length)];
+
+  const familiesByCategory: Record<string, string[]> = {
+    'Walls': ['Basic Wall', 'Curtain Wall', 'Stacked Wall'],
+    'Doors': ['Single-Flush', 'Double-Flush', 'Sliding', 'Bi-Fold', 'Revolving'],
+    'Windows': ['Fixed', 'Casement', 'Awning', 'Double Hung', 'Sliding'],
+    'Floors': ['Floor', 'Floor: Structural'],
+    'Structural Columns': ['Concrete-Rectangular-Column', 'Concrete-Round-Column', 'Steel-Wide Flange-Column'],
+    'Structural Framing': ['Concrete-Rectangular Beam', 'Steel-Wide Flange', 'Wood-Timber'],
+    'Ceilings': ['Compound Ceiling', 'Basic Ceiling'],
+    'Roofs': ['Basic Roof', 'Sloped Glazing'],
+    'Stairs': ['Assembled Stair', 'Cast-In-Place Stair', 'Precast Stair'],
+    'Railings': ['Handrail - Pipe', 'Handrail - Rectangular', 'Guardrail - Pipe'],
+    'Casework': ['Base Cabinet', 'Upper Cabinet', 'Tall Cabinet'],
+    'Generic Models': ['Generic Model'],
+  };
+  const families = familiesByCategory[category] || ['Standard'];
+  const family = families[Math.floor(random() * families.length)];
+
+  const typesByCategory: Record<string, string[]> = {
+    'Walls': ['Generic - 200mm', 'Exterior - Brick on CMU', 'Interior - 135mm Partition', 'Concrete 250mm', 'CW 102-50-100p'],
+    'Doors': ['0915 x 2134mm', '0864 x 2032mm', '1830 x 2134mm', 'Fire Rated 90min'],
+    'Windows': ['0610 x 1220mm', '0915 x 1525mm', '1220 x 1830mm', 'Storefront'],
+    'Floors': ['Generic 300mm', 'Concrete with Tile', 'Wood Joist 250mm'],
+    'Structural Columns': ['450 x 450mm', '600 x 600mm', 'W12x26', 'W14x48'],
+    'Structural Framing': ['300 x 600mm', 'W10x22', 'W12x26', '200 x 400mm'],
+    'Ceilings': ['600 x 600mm Grid', '2x2 ACT System', 'GWB on Mtl. Stud'],
+    'Roofs': ['Generic - 400mm', 'Steel Truss - Insulated', 'Concrete - Membrane'],
+    'Stairs': ['Residential - 900mm', 'Commercial - 1200mm', 'Monumental - 1800mm'],
+    'Railings': ['900mm', '1050mm', '1100mm'],
+    'Casework': ['Base - 600mm', 'Base - 900mm', 'Upper - 300mm'],
+    'Generic Models': ['Default'],
+  };
+  const types = typesByCategory[category] || ['Standard'];
+  const type = types[Math.floor(random() * types.length)];
+
+  const markPrefix = category.charAt(0).toUpperCase();
+  const markNumber = Math.floor(random() * 900) + 100;
+  const mark = `${markPrefix}-${markNumber}`;
+
+  const levelNames = ['Level 00', 'Level 01', 'Level 02', 'Level 03', 'Level 04', 'B1 - Basement', 'Ground Floor', 'Roof'];
+  const baseLevel = levelNames[Math.floor(random() * levelNames.length)];
+  const topLevel = levelNames[Math.min(levelNames.indexOf(baseLevel) + 1 + Math.floor(random() * 2), levelNames.length - 1)];
+
+  const baseOffset = (random() * 0.5 - 0.1).toFixed(3);
+  const topOffset = (random() * 0.3 - 0.1).toFixed(3);
+
+  const length = (random() * 5.5 + 0.5).toFixed(3);
+  const width = (random() * 3.0 + 0.2).toFixed(3);
+  const height = (random() * 3.5 + 2.4).toFixed(3);
+  const thickness = (random() * 0.35 + 0.1).toFixed(3);
+  const area = (parseFloat(length) * parseFloat(height)).toFixed(2);
+  const volume = (parseFloat(length) * parseFloat(width) * parseFloat(height)).toFixed(3);
+  const perimeter = ((parseFloat(length) + parseFloat(width)) * 2).toFixed(2);
+
+  const structuralMaterials = ['Concrete, Cast-in-Place gray', 'Steel, ASTM A992', 'Concrete, Precast', 'Wood - Lumber', 'Aluminum'];
+  const structuralMaterial = structuralMaterials[Math.floor(random() * structuralMaterials.length)];
+  
+  const finishMaterials = ['Paint', 'Ceramic Tile', 'Gypsum Wall Board', 'Wood - Cherry', 'Glass', 'Brick, Common'];
+  const finishMaterial = finishMaterials[Math.floor(random() * finishMaterials.length)];
+
+  const fireRatings = ['', '30 min', '60 min', '90 min', '120 min', '180 min'];
+  const fireRating = fireRatings[Math.floor(random() * fireRatings.length)];
+
+  const thermalValues = ['', 'R-13', 'R-19', 'R-21', 'R-30', 'R-38'];
+  const thermalResistance = thermalValues[Math.floor(random() * thermalValues.length)];
+
+  const phases = ['Existing', 'New Construction', 'Demolition', 'Temporary'];
+  const phaseCreated = phases[Math.floor(random() * 3)];
+  const phaseDemolished = random() > 0.8 ? phases[3] : '';
+
+  const designOptions = ['Main Model', 'Option A', 'Option B'];
+  const designOption = designOptions[Math.floor(random() * designOptions.length)];
+
+  const worksets = ['Shared Levels and Grids', 'Architecture', 'Structure', 'MEP', 'Interiors'];
+  const workset = worksets[Math.floor(random() * worksets.length)];
+
+  const ifcGuid = `${seed.toString(16).padStart(8, '0').toUpperCase()}-${(seed * 2).toString(16).padStart(4, '0').toUpperCase()}-${(seed * 3).toString(16).padStart(4, '0').toUpperCase()}-${(seed * 4).toString(16).padStart(4, '0').toUpperCase()}-${(seed * 5).toString(16).padStart(12, '0').toUpperCase()}`;
+
+  const createdYear = 2020 + Math.floor(random() * 6);
+  const createdMonth = Math.floor(random() * 12) + 1;
+  const createdDay = Math.floor(random() * 28) + 1;
+  const createdDate = `${createdYear}-${createdMonth.toString().padStart(2, '0')}-${createdDay.toString().padStart(2, '0')}`;
+
+  const displayName = name || key;
+
+  return {
+    element: {
+      key,
+      name: displayName,
+      pseudoDbId,
+      externalId,
+    },
+    source: 'mock',
+    units: 'm',
+    cachedAt: new Date().toISOString(),
+    groups: [
+      {
+        group: 'Identity Data',
+        expanded: true,
+        props: [
+          { name: 'Category', value: category },
+          { name: 'Family', value: family },
+          { name: 'Type', value: type },
+          { name: 'Type Name', value: `${family}: ${type}` },
+          { name: 'Mark', value: mark },
+          { name: 'Comments', value: '' },
+        ],
+      },
+      {
+        group: 'Constraints',
+        expanded: true,
+        props: [
+          { name: 'Base Constraint', value: baseLevel },
+          { name: 'Base Offset', value: `${baseOffset} m`, type: 'length' },
+          { name: 'Top Constraint', value: topLevel },
+          { name: 'Top Offset', value: `${topOffset} m`, type: 'length' },
+          { name: 'Room Bounding', value: random() > 0.3 ? 'Yes' : 'No' },
+          { name: 'Related to Mass', value: 'No' },
+        ],
+      },
+      {
+        group: 'Dimensions',
+        expanded: true,
+        props: [
+          { name: 'Length', value: `${length} m`, type: 'length' },
+          { name: 'Width', value: `${width} m`, type: 'length' },
+          { name: 'Height', value: `${height} m`, type: 'length' },
+          { name: 'Thickness', value: `${thickness} m`, type: 'length' },
+          { name: 'Area', value: `${area} m²`, type: 'area' },
+          { name: 'Volume', value: `${volume} m³`, type: 'volume' },
+          { name: 'Perimeter', value: `${perimeter} m`, type: 'length' },
+        ],
+      },
+      {
+        group: 'Materials and Finishes',
+        expanded: false,
+        props: [
+          { name: 'Structural Material', value: structuralMaterial },
+          { name: 'Finish Material', value: finishMaterial },
+          { name: 'Color', value: ['White', 'Gray', 'Beige', 'Brown', 'Black'][Math.floor(random() * 5)] },
+        ],
+      },
+      {
+        group: 'Analytical Properties',
+        expanded: false,
+        props: [
+          { name: 'Fire Rating', value: fireRating || 'Not Rated' },
+          { name: 'Thermal Resistance (R)', value: thermalResistance || 'Not Defined' },
+          { name: 'Acoustic Rating', value: random() > 0.5 ? `STC ${Math.floor(random() * 30 + 35)}` : 'Not Defined' },
+        ],
+      },
+      {
+        group: 'Phasing',
+        expanded: false,
+        props: [
+          { name: 'Phase Created', value: phaseCreated },
+          { name: 'Phase Demolished', value: phaseDemolished || 'None' },
+        ],
+      },
+      {
+        group: 'IFC Parameters',
+        expanded: false,
+        props: [
+          { name: 'IFC GUID', value: ifcGuid },
+          { name: 'Export to IFC', value: 'By Type' },
+          { name: 'IFC Type', value: `Ifc${category.replace(/s$/, '').replace(/ /g, '')}` },
+        ],
+      },
+      {
+        group: 'Other',
+        expanded: false,
+        props: [
+          { name: 'Design Option', value: designOption },
+          { name: 'Workset', value: workset },
+          { name: 'Element ID', value: `#${pseudoDbId}` },
+          { name: 'Created', value: createdDate },
+          { name: 'Last Modified', value: new Date().toISOString().split('T')[0] },
+        ],
+      },
+    ],
+  };
+}
+
+app.get('/api/mock-properties', (req: Request, res: Response) => {
+  const key = req.query.key as string;
+  const name = req.query.name as string || '';
+
+  if (!key) {
+    res.status(400).json({
+      error: 'Missing required parameter: key',
+      message: 'Provide a selection key via ?key=<value>',
+    });
+    return;
+  }
+
+  let data = mockPropertiesCache.get(key);
+  
+  if (!data) {
+    data = generateMockProperties(key, name);
+    mockPropertiesCache.set(key, data);
+    console.log(`[MockProps] Generated and cached properties for key: ${key.substring(0, 30)}...`);
+  } else {
+    console.log(`[MockProps] Returning cached properties for key: ${key.substring(0, 30)}...`);
+  }
+
+  res.json(data);
+});
+
+app.delete('/api/mock-properties/cache', (_req: Request, res: Response) => {
+  const count = mockPropertiesCache.size;
+  mockPropertiesCache.clear();
+  console.log(`[MockProps] Cache cleared (${count} entries)`);
+  res.json({ success: true, clearedEntries: count });
+});
+
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[Server] Error:', err.message);
   console.error(err.stack);
@@ -1182,10 +1447,11 @@ async function startServer() {
   ║    GET  /api/pointclouds/debug?cloudId=    - Debug point cloud status  ║
 ║                                                                        ║
 ║  Viewer Endpoints:                                                     ║
-║    GET  /api/bim-models                    - List BIM models (APS+IFC) ║
-║    GET  /api/alignment?modelId=            - Get alignment matrix      ║
-║    POST /api/alignment                     - Save alignment matrix     ║
-║    GET  /viewer                            - Potree + BIM viewer       ║
+  ║    GET  /api/bim-models                    - List BIM models (APS+IFC) ║
+  ║    GET  /api/alignment?modelId=            - Get alignment matrix      ║
+  ║    POST /api/alignment                     - Save alignment matrix     ║
+  ║    GET  /api/mock-properties?key=          - Mock properties (ENTREGA1)║
+  ║    GET  /viewer                            - Potree + BIM viewer       ║
 ╚════════════════════════════════════════════════════════════════════════╝
     `);
   });

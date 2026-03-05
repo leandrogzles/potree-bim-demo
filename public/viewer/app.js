@@ -15,6 +15,7 @@
       bimModels: '/api/bim-models',
       alignment: '/api/alignment',
       ifcEnsureGlb: '/api/ifc/ensure-glb',
+      mockProperties: '/api/mock-properties',
     },
     defaultPointBudget: 2_000_000,
     nudgeSteps: {
@@ -65,6 +66,25 @@
     currentUnits: 'm',
     initialized: false,
     isConverting: false,
+
+    // Selection state (ENTREGA 2 - Enhanced)
+    selection: {
+      objectRoot: null,
+      hitObject: null,
+      selectionKey: null,
+      objectName: null,
+      objectUuid: null,
+      pseudoDbId: null,
+    },
+    lastClickCoords: null,
+    selectionPanelVisible: false,
+    selectionPinned: false,
+    cachedProperties: null,
+    propertiesCache: new Map(),
+    collapsedGroups: new Set(),
+    hiddenObjects: new Set(),
+    isolatedObject: null,
+    searchQuery: '',
   };
 
   function debugLog(message, type = 'info') {
@@ -671,6 +691,15 @@
   function unloadBim() {
     if (!state.currentBimRoot) return;
 
+    if (state.selection.objectRoot) {
+      clearSelection(true);
+    }
+    
+    state.hiddenObjects.clear();
+    state.isolatedObject = null;
+    state.propertiesCache.clear();
+    updateHiddenCounter();
+
     debugLog('Unloading BIM model');
     state.viewer.scene.scene.remove(state.currentBimRoot);
 
@@ -1251,6 +1280,705 @@
     debugLog('========================================');
   }
 
+  // ============================================================================
+  // ENTREGA 2: Robust Selection + Advanced Properties Panel
+  // ============================================================================
+
+  const INSIGNIFICANT_NAME_PATTERNS = [
+    /^mesh_?\d*$/i,
+    /^object_?\d*$/i,
+    /^group_?\d*$/i,
+    /^node_?\d*$/i,
+    /^primitive\d*$/i,
+    /^submesh\d*$/i,
+    /^_\d+$/,
+    /^\d+$/,
+  ];
+
+  function isSignificantName(name) {
+    if (!name || name.length === 0) return false;
+    if (name === 'Scene' || name === 'RootNode' || name === 'bimRoot') return false;
+    for (const pattern of INSIGNIFICANT_NAME_PATTERNS) {
+      if (pattern.test(name)) return false;
+    }
+    return true;
+  }
+
+  function isContainerNode(obj) {
+    if (!obj) return false;
+    const name = obj.name || '';
+    if (name === 'Scene' || name === 'RootNode' || name === 'bimRoot') return true;
+    if (obj === state.currentBimRoot) return true;
+    if (obj.parent === state.currentBimRoot && !obj.isMesh) {
+      let meshCount = 0;
+      obj.traverse((c) => { if (c.isMesh) meshCount++; });
+      if (meshCount > 50) return true;
+    }
+    return false;
+  }
+
+  function findSelectionRoot(hitObject) {
+    let current = hitObject;
+    let bestCandidate = hitObject;
+
+    console.log(`[Selection] Finding root for hit: ${hitObject.name || hitObject.uuid}`);
+
+    while (current && current !== state.currentBimRoot) {
+      if (isContainerNode(current)) {
+        console.log(`[Selection] Skipping container node: ${current.name || current.uuid}`);
+        current = current.parent;
+        continue;
+      }
+
+      if (current.userData && current.userData.selectable === true) {
+        console.log(`[Selection] Found userData.selectable on: ${current.name || current.uuid}`);
+        return current;
+      }
+
+      if (isSignificantName(current.name)) {
+        bestCandidate = current;
+        console.log(`[Selection] Found significant name: ${current.name}`);
+      }
+
+      current = current.parent;
+    }
+
+    if (isContainerNode(bestCandidate)) {
+      console.log(`[Selection] Best candidate is container, falling back to hitObject`);
+      bestCandidate = hitObject;
+    }
+
+    console.log(`[Selection] Chosen root: ${bestCandidate.name || bestCandidate.uuid}`);
+    return bestCandidate;
+  }
+
+  function applyHighlight(root) {
+    if (!root) return;
+
+    root.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      
+      materials.forEach((mat, idx) => {
+        if (!child.userData.__highlightOrig) {
+          child.userData.__highlightOrig = {};
+        }
+        
+        const key = `mat_${idx}`;
+        child.userData.__highlightOrig[key] = {
+          hasEmissive: mat.emissive !== undefined,
+          emissiveHex: mat.emissive ? mat.emissive.getHex() : 0,
+          emissiveIntensity: mat.emissiveIntensity !== undefined ? mat.emissiveIntensity : 0,
+          colorHex: mat.color ? mat.color.getHex() : 0xffffff,
+          opacity: mat.opacity,
+          transparent: mat.transparent,
+        };
+
+        if (mat.emissive !== undefined) {
+          mat.emissive.setHex(0xffff00);
+          mat.emissiveIntensity = 0.5;
+        } else {
+          mat.color.setHex(0xffff00);
+          mat.transparent = true;
+          mat.opacity = 0.7;
+        }
+        mat.needsUpdate = true;
+      });
+    });
+  }
+
+  function restoreHighlight(root) {
+    if (!root) return;
+
+    root.traverse((child) => {
+      if (!child.isMesh || !child.material || !child.userData.__highlightOrig) return;
+
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      
+      materials.forEach((mat, idx) => {
+        const key = `mat_${idx}`;
+        const orig = child.userData.__highlightOrig[key];
+        if (!orig) return;
+
+        if (orig.hasEmissive && mat.emissive) {
+          mat.emissive.setHex(orig.emissiveHex);
+          mat.emissiveIntensity = orig.emissiveIntensity;
+        } else if (mat.color) {
+          mat.color.setHex(orig.colorHex);
+          mat.transparent = orig.transparent;
+          mat.opacity = orig.opacity;
+        }
+        mat.needsUpdate = true;
+      });
+
+      delete child.userData.__highlightOrig;
+    });
+  }
+
+  function selectObject(objectRoot, hitObject, key) {
+    if (state.selectionPinned && state.selection.objectRoot) {
+      debugLog('Selection is pinned, ignoring new selection');
+      return;
+    }
+
+    clearSelection(false);
+
+    if (!objectRoot) return;
+
+    applyHighlight(objectRoot);
+
+    const pseudoDbId = simpleHashClient(key) % 1000000;
+
+    state.selection = {
+      objectRoot: objectRoot,
+      hitObject: hitObject,
+      selectionKey: key,
+      objectName: objectRoot.name || '',
+      objectUuid: objectRoot.uuid,
+      pseudoDbId: pseudoDbId,
+    };
+
+    updateSelectionPanel();
+    showSelectionPanel();
+    showSelectionIndicator(true);
+
+    debugLog(`Selected: ${key} (name: ${objectRoot.name || 'unnamed'}, dbId: ${pseudoDbId})`, 'success');
+  }
+
+  function simpleHashClient(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash);
+  }
+
+  function clearSelection(hidePanel = true) {
+    const sel = state.selection;
+
+    if (sel.objectRoot) {
+      restoreHighlight(sel.objectRoot);
+    }
+
+    state.selection = {
+      objectRoot: null,
+      hitObject: null,
+      selectionKey: null,
+      objectName: null,
+      objectUuid: null,
+      pseudoDbId: null,
+    };
+    state.cachedProperties = null;
+    state.searchQuery = '';
+
+    const searchInput = document.getElementById('props-search');
+    if (searchInput) searchInput.value = '';
+    updateSearchClearButton();
+
+    if (hidePanel) {
+      hideSelectionPanel();
+    }
+    showSelectionIndicator(false);
+    updateSelectionPanel();
+
+    debugLog('Selection cleared');
+  }
+
+  function showSelectionPanel() {
+    const panel = document.getElementById('selection-panel');
+    if (panel) {
+      panel.classList.add('visible');
+      if (state.selectionPinned) {
+        panel.classList.add('pinned');
+      }
+      state.selectionPanelVisible = true;
+    }
+  }
+
+  function hideSelectionPanel() {
+    const panel = document.getElementById('selection-panel');
+    if (panel) {
+      panel.classList.remove('visible');
+      state.selectionPanelVisible = false;
+    }
+    const propsContainer = document.getElementById('props-container');
+    if (propsContainer) propsContainer.innerHTML = '';
+    const propsActions = document.getElementById('props-actions');
+    if (propsActions) propsActions.style.display = 'none';
+  }
+
+  function showSelectionIndicator(show) {
+    const indicator = document.getElementById('selection-indicator');
+    if (indicator) {
+      if (show) {
+        indicator.classList.add('visible');
+        setTimeout(() => indicator.classList.remove('visible'), 3000);
+      } else {
+        indicator.classList.remove('visible');
+      }
+    }
+  }
+
+  function toggleSelectionPin() {
+    state.selectionPinned = !state.selectionPinned;
+    const panel = document.getElementById('selection-panel');
+    const pinBtn = document.getElementById('btn-pin-selection');
+    
+    if (panel) {
+      panel.classList.toggle('pinned', state.selectionPinned);
+    }
+    if (pinBtn) {
+      pinBtn.classList.toggle('active', state.selectionPinned);
+    }
+    
+    debugLog(`Selection ${state.selectionPinned ? 'pinned' : 'unpinned'}`);
+    showStatus(state.selectionPinned ? 'Selection pinned' : 'Selection unpinned', 'info');
+  }
+
+  function updateSelectionPanel() {
+    const sel = state.selection;
+
+    const keyEl = document.getElementById('sel-key');
+    const nameEl = document.getElementById('sel-name');
+    const dbIdEl = document.getElementById('sel-dbid');
+    const meshCountEl = document.getElementById('sel-mesh-count');
+    const lastClickEl = document.getElementById('sel-last-click');
+    const sourceEl = document.getElementById('sel-source');
+
+    if (keyEl) keyEl.textContent = sel.selectionKey || '-';
+    if (nameEl) nameEl.textContent = sel.objectName || '(unnamed)';
+    if (dbIdEl) dbIdEl.textContent = sel.pseudoDbId ? `#${sel.pseudoDbId}` : '-';
+
+    if (meshCountEl) {
+      if (state.currentBimRoot) {
+        let count = 0;
+        state.currentBimRoot.traverse((c) => { if (c.isMesh) count++; });
+        meshCountEl.textContent = count.toString();
+      } else {
+        meshCountEl.textContent = '-';
+      }
+    }
+
+    if (lastClickEl && state.lastClickCoords) {
+      const c = state.lastClickCoords;
+      lastClickEl.textContent = `(${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)})`;
+    }
+
+    if (sourceEl) {
+      sourceEl.textContent = state.cachedProperties ? state.cachedProperties.source || 'mock' : '-';
+    }
+
+    const propsBtn = document.getElementById('btn-show-props');
+    const hideBtn = document.getElementById('btn-hide-selected');
+    const isolateBtn = document.getElementById('btn-isolate-selected');
+
+    if (propsBtn) propsBtn.disabled = !sel.selectionKey;
+    if (hideBtn) hideBtn.disabled = !sel.objectRoot;
+    if (isolateBtn) isolateBtn.disabled = !sel.objectRoot;
+  }
+
+  async function fetchAndShowProperties() {
+    const sel = state.selection;
+    if (!sel.selectionKey) {
+      debugLog('No selection to fetch properties for', 'warning');
+      return;
+    }
+
+    const propsContainer = document.getElementById('props-container');
+    const propsActions = document.getElementById('props-actions');
+    if (!propsContainer) return;
+
+    if (state.propertiesCache.has(sel.selectionKey)) {
+      const cached = state.propertiesCache.get(sel.selectionKey);
+      state.cachedProperties = cached;
+      renderProperties(cached);
+      if (propsActions) propsActions.style.display = 'block';
+      debugLog(`Properties loaded from cache: ${sel.selectionKey}`, 'success');
+      updateSelectionPanel();
+      return;
+    }
+
+    propsContainer.innerHTML = '<div class="props-loading"><div class="spinner"></div>Loading properties...</div>';
+
+    try {
+      const url = `${CONFIG.api.mockProperties}?key=${encodeURIComponent(sel.selectionKey)}&name=${encodeURIComponent(sel.objectName || '')}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      state.cachedProperties = data;
+      state.propertiesCache.set(sel.selectionKey, data);
+
+      renderProperties(data);
+      if (propsActions) propsActions.style.display = 'block';
+      debugLog(`Properties loaded for: ${sel.selectionKey}`, 'success');
+      updateSelectionPanel();
+
+    } catch (error) {
+      propsContainer.innerHTML = `<div class="props-error">Failed to load properties: ${error.message}</div>`;
+      debugLog(`Failed to fetch properties: ${error.message}`, 'error');
+    }
+  }
+
+  function renderProperties(data) {
+    const propsContainer = document.getElementById('props-container');
+    if (!propsContainer) return;
+
+    if (!data.groups || data.groups.length === 0) {
+      propsContainer.innerHTML = '<div class="no-selection">No properties available</div>';
+      return;
+    }
+
+    let html = '';
+    const query = state.searchQuery.toLowerCase();
+
+    data.groups.forEach((group, groupIdx) => {
+      const isCollapsed = state.collapsedGroups.has(group.group);
+      const groupClass = isCollapsed ? 'props-group collapsed' : 'props-group';
+      
+      let hasVisibleProps = false;
+      let propsHtml = '';
+
+      group.props.forEach((prop) => {
+        const matchesSearch = !query || 
+          prop.name.toLowerCase().includes(query) || 
+          (prop.value && prop.value.toLowerCase().includes(query));
+        
+        const rowClass = matchesSearch ? 'prop-row' : 'prop-row filtered-out';
+        const highlight = query && matchesSearch ? ' highlight' : '';
+        
+        if (matchesSearch) hasVisibleProps = true;
+
+        propsHtml += `<div class="${rowClass}${highlight}" data-name="${escapeHtml(prop.name)}" data-value="${escapeHtml(prop.value)}">`;
+        propsHtml += `<span class="prop-name">${escapeHtml(prop.name)}</span>`;
+        propsHtml += `<span class="prop-value">${escapeHtml(prop.value)}</span>`;
+        propsHtml += `</div>`;
+      });
+
+      const groupVisibleClass = (query && !hasVisibleProps) ? ' filtered-out' : '';
+
+      html += `<div class="${groupClass}${groupVisibleClass}" data-group="${escapeHtml(group.group)}">`;
+      html += `<div class="props-group-header" onclick="window.togglePropsGroup('${escapeHtml(group.group)}')">`;
+      html += `<div class="props-group-title"><span class="props-group-toggle">▼</span>${escapeHtml(group.group)}</div>`;
+      html += `</div>`;
+      html += `<div class="props-group-content">${propsHtml}</div>`;
+      html += `</div>`;
+    });
+
+    const allFiltered = !html.includes('prop-row"') && !html.includes('prop-row highlight');
+    if (query && allFiltered) {
+      html += '<div class="no-results">No properties match your search</div>';
+    }
+
+    propsContainer.innerHTML = html;
+  }
+
+  function togglePropsGroup(groupName) {
+    if (state.collapsedGroups.has(groupName)) {
+      state.collapsedGroups.delete(groupName);
+    } else {
+      state.collapsedGroups.add(groupName);
+    }
+
+    const groupEl = document.querySelector(`.props-group[data-group="${groupName}"]`);
+    if (groupEl) {
+      groupEl.classList.toggle('collapsed');
+    }
+  }
+
+  function filterProperties(query) {
+    state.searchQuery = query;
+    if (state.cachedProperties) {
+      renderProperties(state.cachedProperties);
+    }
+    updateSearchClearButton();
+  }
+
+  function updateSearchClearButton() {
+    const clearBtn = document.getElementById('btn-clear-search');
+    if (clearBtn) {
+      clearBtn.classList.toggle('visible', state.searchQuery.length > 0);
+    }
+  }
+
+  function copySelectionKey() {
+    const key = state.selection.selectionKey;
+    if (!key) return;
+
+    navigator.clipboard.writeText(key).then(() => {
+      showStatus('Selection key copied to clipboard', 'success');
+    }).catch(() => {
+      showStatus('Failed to copy to clipboard', 'error');
+    });
+  }
+
+  function copyPropertiesJson() {
+    if (!state.cachedProperties) return;
+
+    const json = JSON.stringify(state.cachedProperties, null, 2);
+    navigator.clipboard.writeText(json).then(() => {
+      showStatus('Properties JSON copied to clipboard', 'success');
+    }).catch(() => {
+      showStatus('Failed to copy to clipboard', 'error');
+    });
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ============================================================================
+  // ENTREGA 2: Hide / Isolate / Show All
+  // ============================================================================
+
+  function hideSelectedElement() {
+    const sel = state.selection;
+    if (!sel.objectRoot) {
+      showStatus('No element selected', 'warning');
+      return;
+    }
+
+    restoreHighlight(sel.objectRoot);
+    sel.objectRoot.visible = false;
+    state.hiddenObjects.add(sel.objectRoot.uuid);
+    
+    updateHiddenCounter();
+    clearSelection(false);
+    showStatus('Element hidden', 'info');
+    debugLog(`Hidden: ${sel.selectionKey}`);
+  }
+
+  function isolateSelectedElement() {
+    const sel = state.selection;
+    if (!sel.objectRoot || !state.currentBimRoot) {
+      showStatus('No element selected', 'warning');
+      return;
+    }
+
+    state.hiddenObjects.clear();
+    
+    state.currentBimRoot.traverse((child) => {
+      if (child === state.currentBimRoot) return;
+      if (child === sel.objectRoot) return;
+      
+      let isDescendant = false;
+      let parent = child.parent;
+      while (parent) {
+        if (parent === sel.objectRoot) {
+          isDescendant = true;
+          break;
+        }
+        parent = parent.parent;
+      }
+
+      if (!isDescendant && child.isMesh) {
+        child.visible = false;
+        state.hiddenObjects.add(child.uuid);
+      }
+    });
+
+    sel.objectRoot.visible = true;
+    sel.objectRoot.traverse((child) => {
+      child.visible = true;
+    });
+
+    state.isolatedObject = sel.objectRoot;
+    updateHiddenCounter();
+    showStatus('Element isolated', 'info');
+    debugLog(`Isolated: ${sel.selectionKey}`);
+  }
+
+  function showAllElements() {
+    if (!state.currentBimRoot) return;
+
+    state.currentBimRoot.traverse((child) => {
+      child.visible = true;
+    });
+
+    state.hiddenObjects.clear();
+    state.isolatedObject = null;
+    updateHiddenCounter();
+    showStatus('All elements visible', 'success');
+    debugLog('All elements shown');
+  }
+
+  function updateHiddenCounter() {
+    const counter = document.getElementById('hidden-counter');
+    const countEl = document.getElementById('hidden-count');
+    
+    if (counter && countEl) {
+      const count = state.hiddenObjects.size;
+      countEl.textContent = count.toString();
+      counter.classList.toggle('visible', count > 0);
+    }
+  }
+
+  // ============================================================================
+  // ENTREGA 2: Raycast and Event Handlers
+  // ============================================================================
+
+  function setupBimRaycast() {
+    const renderArea = document.getElementById('potree_render_area');
+    if (!renderArea) {
+      debugLog('Cannot setup raycast: potree_render_area not found', 'error');
+      return;
+    }
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    renderArea.addEventListener('click', (event) => {
+      if (!state.currentBimRoot || !state.viewer) return;
+
+      if (state.selectionPinned && state.selection.objectRoot) {
+        return;
+      }
+
+      const rect = renderArea.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      const camera = state.viewer.scene.getActiveCamera();
+      raycaster.setFromCamera(mouse, camera);
+
+      const meshes = [];
+      state.currentBimRoot.traverse((child) => {
+        if (child.isMesh && child.visible) {
+          meshes.push(child);
+        }
+      });
+
+      const intersects = raycaster.intersectObjects(meshes, false);
+
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        const hitObject = hit.object;
+
+        state.lastClickCoords = hit.point.clone();
+
+        const selectionRoot = findSelectionRoot(hitObject);
+        const selectionKey = selectionRoot.name || selectionRoot.uuid;
+
+        selectObject(selectionRoot, hitObject, selectionKey);
+
+        debugLog(`Raycast hit: mesh=${hitObject.name || hitObject.uuid}, root=${selectionRoot.name || selectionRoot.uuid}`);
+      } else {
+        debugLog('No BIM element hit');
+        if (state.selectionPanelVisible && !state.selectionPinned) {
+          showStatus('No BIM element under cursor', 'info');
+        }
+      }
+    });
+
+    debugLog('BIM raycast click handler setup complete');
+  }
+
+  function setupSelectionEventHandlers() {
+    document.getElementById('btn-close-selection')?.addEventListener('click', () => {
+      hideSelectionPanel();
+    });
+
+    document.getElementById('btn-clear-selection')?.addEventListener('click', () => {
+      state.selectionPinned = false;
+      clearSelection(true);
+    });
+
+    document.getElementById('btn-show-props')?.addEventListener('click', () => {
+      fetchAndShowProperties();
+    });
+
+    document.getElementById('btn-pin-selection')?.addEventListener('click', () => {
+      toggleSelectionPin();
+    });
+
+    document.getElementById('btn-copy-key')?.addEventListener('click', () => {
+      copySelectionKey();
+    });
+
+    document.getElementById('btn-copy-json')?.addEventListener('click', () => {
+      copyPropertiesJson();
+    });
+
+    document.getElementById('btn-hide-selected')?.addEventListener('click', () => {
+      hideSelectedElement();
+    });
+
+    document.getElementById('btn-isolate-selected')?.addEventListener('click', () => {
+      isolateSelectedElement();
+    });
+
+    document.getElementById('btn-show-all')?.addEventListener('click', () => {
+      showAllElements();
+    });
+
+    document.getElementById('btn-show-all-inline')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      showAllElements();
+    });
+
+    const searchInput = document.getElementById('props-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        filterProperties(e.target.value);
+      });
+    }
+
+    document.getElementById('btn-clear-search')?.addEventListener('click', () => {
+      const searchInput = document.getElementById('props-search');
+      if (searchInput) {
+        searchInput.value = '';
+        filterProperties('');
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+      if (e.key === 'Escape') {
+        if (state.selectionPinned) {
+          state.selectionPinned = false;
+          const panel = document.getElementById('selection-panel');
+          const pinBtn = document.getElementById('btn-pin-selection');
+          if (panel) panel.classList.remove('pinned');
+          if (pinBtn) pinBtn.classList.remove('active');
+        }
+        if (state.selectionPanelVisible) {
+          clearSelection(true);
+        }
+      }
+
+      if (e.key === 'h' || e.key === 'H') {
+        hideSelectedElement();
+      }
+
+      if (e.key === 'i' || e.key === 'I') {
+        isolateSelectedElement();
+      }
+
+      if (e.key === 'a' || e.key === 'A') {
+        if (e.shiftKey) {
+          showAllElements();
+        }
+      }
+    });
+
+    window.togglePropsGroup = togglePropsGroup;
+
+    debugLog('Selection event handlers setup complete');
+    debugLog('Keys: H=hide, I=isolate, Shift+A=show all, ESC=clear/unpin');
+  }
+
   function setupEventHandlers() {
     document.getElementById('btn-load')?.addEventListener('click', loadSelected);
 
@@ -1400,7 +2128,7 @@
       }
     });
 
-    debugLog('Keyboard: R=reset, F=focus all, C=cloud, B=bim, D=diagnostics, U=toggle unlit');
+    debugLog('Keyboard: R=reset, F=focus all, C=cloud, B=bim, D=diagnostics, U=unlit, H=hide, I=isolate, Shift+A=show all');
   }
 
   function selectFromUrl() {
@@ -1444,6 +2172,8 @@
     selectFromUrl();
 
     setupEventHandlers();
+    setupSelectionEventHandlers();
+    setupBimRaycast();
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('modelId') || params.get('cloudId')) {
@@ -1452,6 +2182,7 @@
 
     hideLoading();
     debugLog('=== Viewer Ready ===', 'success');
+    debugLog('Click on BIM elements to select them (ENTREGA 2: robust selection + advanced panel)', 'info');
   }
 
   if (document.readyState === 'loading') {
@@ -1464,4 +2195,14 @@
   window.runDiagnostics = runFullDiagnostics;
   window.autoAlign = autoAlignBimToCloud;
   window.setForceUnlit = setForceUnlit;
+
+  // ENTREGA 2: Selection functions exposed for debugging
+  window.clearSelection = clearSelection;
+  window.selectObject = selectObject;
+  window.fetchAndShowProperties = fetchAndShowProperties;
+  window.hideSelectedElement = hideSelectedElement;
+  window.isolateSelectedElement = isolateSelectedElement;
+  window.showAllElements = showAllElements;
+  window.findSelectionRoot = findSelectionRoot;
+  window.togglePropsGroup = togglePropsGroup;
 })();

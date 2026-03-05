@@ -500,13 +500,142 @@ Converted models are saved to `data/converted/<urn>/<runId>/model.glb`.
 - Left-drag: Rotate camera
 - Right-drag: Pan camera
 - Scroll: Zoom
+- **Click on BIM element** - Select element (emissive highlight) and show selection panel
 
 **Keyboard:**
 - `R` - Reset camera
 - `F` - Focus on both cloud and BIM
 - `C` - Focus on cloud
 - `B` - Focus on BIM
-- `G` - Toggle grid
+- `D` - Run diagnostics
+- `U` - Toggle unlit mode
+- `H` - Hide selected element
+- `I` - Isolate selected element
+- `Shift+A` - Show all elements
+- `ESC` - Clear selection / Unpin selection
+
+### Robust Selection & Advanced Panel (ENTREGA 2)
+
+The viewer includes a **robust selection system** with an advanced properties panel that allows testing the full selection workflow before integrating with real APS property databases.
+
+**Selection System:**
+
+1. **Click any BIM element** in the viewer to select it
+2. The system finds the "Selection Root" - the most meaningful ancestor in the object hierarchy:
+   - Looks for objects with significant names (not generic like "mesh_0", "Object_123")
+   - Checks for `userData.selectable === true`
+   - Falls back to direct child of BIM root
+3. The element gets highlighted using **emissive color** (preserves original materials)
+4. A **Selection Panel** appears with full details and actions
+
+**Highlight System (improved):**
+- Uses `material.emissive` when available (MeshStandardMaterial, MeshPhongMaterial)
+- Preserves original material properties
+- Falls back to color change only if no emissive support
+- Perfect restoration on deselection
+
+**Selection Panel Features:**
+
+| Feature | Description |
+|---------|-------------|
+| **Pin Selection** | Lock current selection, ignore new clicks |
+| **Copy Key** | Copy selection key to clipboard |
+| **Search Properties** | Filter properties by name or value in real-time |
+| **Collapsible Groups** | Click group headers to expand/collapse |
+| **Copy JSON** | Export all properties as JSON |
+| **Hide/Isolate/Show All** | Visibility controls for selected elements |
+
+**Visibility Actions:**
+
+```
+[Hide]      - Hides the selected element
+[Isolate]   - Shows only the selected element, hides all others
+[Show All]  - Restores visibility of all elements
+```
+
+**Keyboard Shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `H` | Hide selected element |
+| `I` | Isolate selected element |
+| `Shift+A` | Show all elements |
+| `ESC` | Clear selection / Unpin |
+
+**Mock Properties (Enhanced):**
+
+The mock properties endpoint now returns richer, more realistic BIM data:
+
+```bash
+# Test the mock properties endpoint
+curl "http://localhost:3000/api/mock-properties?key=Wall-123&name=Interior%20Wall"
+
+# Response (ENTREGA 2 format):
+{
+  "element": {
+    "key": "Wall-123",
+    "name": "Interior Wall",
+    "pseudoDbId": 456789,
+    "externalId": "ext-0006f855"
+  },
+  "source": "mock",
+  "units": "m",
+  "cachedAt": "2024-01-15T10:30:00.000Z",
+  "groups": [
+    {
+      "group": "Identity Data",
+      "expanded": true,
+      "props": [
+        { "name": "Category", "value": "Walls" },
+        { "name": "Family", "value": "Basic Wall" },
+        { "name": "Type", "value": "Generic - 200mm" },
+        ...
+      ]
+    },
+    {
+      "group": "Constraints",
+      "expanded": true,
+      "props": [
+        { "name": "Base Constraint", "value": "Level 01" },
+        { "name": "Top Constraint", "value": "Level 02" },
+        ...
+      ]
+    },
+    {
+      "group": "Dimensions",
+      "expanded": true,
+      "props": [
+        { "name": "Length", "value": "4.235 m" },
+        { "name": "Height", "value": "3.150 m" },
+        { "name": "Area", "value": "13.34 m²" },
+        ...
+      ]
+    },
+    ...
+  ]
+}
+```
+
+**Property Groups:**
+- Identity Data (Category, Family, Type, Mark)
+- Constraints (Base/Top levels and offsets)
+- Dimensions (Length, Width, Height, Area, Volume)
+- Materials and Finishes
+- Analytical Properties (Fire Rating, Thermal)
+- Phasing
+- IFC Parameters
+- Other (Workset, Design Option, Element ID)
+
+**Caching:**
+- Backend: In-memory cache by selection key (persists during server runtime)
+- Frontend: Local cache by selection key (instant subsequent loads)
+- Clear cache: `DELETE /api/mock-properties/cache`
+
+**Key features:**
+- **Deterministic**: Same element always returns the same mock properties (hash-based seed)
+- **Realistic data**: Matches real Revit/BIM property structure
+- **No APS dependency**: Works without property database connection
+- **Selection Key**: Uses `object.name || object.uuid` (will be replaced by `dbId` later)
 
 **UI Panel:**
 - Select point cloud and BIM model from dropdowns
@@ -540,6 +669,14 @@ GET /api/alignment?urn=<urn>  # legacy support
 POST /api/alignment
   { "modelId": "ifc:<ifcId>", "matrix": [16 numbers], "units": "m" }
   # or: { "urn": "<urn>", "matrix": [...], "units": "m" }
+
+# Get mock properties for a selected element (ENTREGA 2)
+GET /api/mock-properties?key=<selectionKey>&name=<objectName>
+# Response: { element, source, units, cachedAt, groups: [{group, expanded, props}] }
+
+# Clear mock properties cache (ENTREGA 2)
+DELETE /api/mock-properties/cache
+# Response: { success: true, clearedEntries: <count> }
 ```
 
 ## Project Structure
