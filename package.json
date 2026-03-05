@@ -1,0 +1,57 @@
+{
+  "name": "potree-bim-demo",
+  "version": "1.0.0",
+  "description": "Download APS/Forge SVF/SVF2 derivatives and prepare for Potree visualization",
+  "main": "dist/server.js",
+  "bin": {
+    "convert-glb": "./dist/cli/convert.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts",
+    "dev:watch": "ts-node-dev --respawn src/server.ts",
+    "clean": "rimraf dist",
+    "convert": "ts-node src/cli/convert.ts",
+    "setup-potree": "ts-node scripts/setup-potree.ts",
+    "postinstall": "node -e \"if(!require('fs').existsSync('public/libs/potree/Potree_1.8')){console.log('\\n⚠️  Run: npm run setup-potree\\n')}\""
+  },
+  "keywords": [
+    "autodesk",
+    "aps",
+    "forge",
+    "svf",
+    "svf2",
+    "potree",
+    "threejs",
+    "gltf",
+    "glb"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@gltf-transform/core": "^4.0.8",
+    "@gltf-transform/extensions": "^4.0.8",
+    "@gltf-transform/functions": "^4.0.8",
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "forge-convert-utils": "^3.1.0",
+    "forge-server-utils": "^9.0.5",
+    "multer": "^2.1.1",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.19",
+    "@types/uuid": "^9.0.8",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

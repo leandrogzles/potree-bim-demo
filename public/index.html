@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Potree BIM Demo - API</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      color: #eee;
+      padding: 40px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 8px;
+      color: #e94560;
+    }
+
+    .subtitle {
+      color: #888;
+      margin-bottom: 40px;
+      font-size: 1.1rem;
+    }
+
+    .card {
+      background: rgba(22, 33, 62, 0.8);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      border: 1px solid #0f3460;
+    }
+
+    .card h2 {
+      font-size: 1.3rem;
+      margin-bottom: 16px;
+      color: #e94560;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card h2 .badge {
+      font-size: 0.75rem;
+      background: #0f9d58;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: normal;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .form-group {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .form-group.full {
+      flex: none;
+      width: 100%;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      color: #888;
+      font-size: 0.9rem;
+    }
+
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 10px 12px;
+      background: #1a1a2e;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 1rem;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #e94560;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      background: #e94560;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover {
+      background: #c73e54;
+    }
+
+    .btn:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    .btn.secondary {
+      background: #0f3460;
+    }
+
+    .btn.secondary:hover {
+      background: #1a4a7a;
+    }
+
+    .btn.success {
+      background: #0f9d58;
+    }
+
+    .btn.success:hover {
+      background: #0d8a4c;
+    }
+
+    .objects-list {
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      margin-top: 16px;
+    }
+
+    .object-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid #0f3460;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .object-item:last-child {
+      border-bottom: none;
+    }
+
+    .object-item:hover {
+      background: rgba(233, 69, 96, 0.1);
+    }
+
+    .object-item.selected {
+      background: rgba(233, 69, 96, 0.2);
+      border-left: 3px solid #e94560;
+    }
+
+    .object-item .info {
+      flex: 1;
+    }
+
+    .object-item .name {
+      font-weight: 500;
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+
+    .object-item .meta {
+      font-size: 0.8rem;
+      color: #666;
+    }
+
+    .object-item .size {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+      color: #4ecdc4;
+      margin-left: 16px;
+    }
+
+    .object-item .status-icon {
+      margin-left: 12px;
+      font-size: 1.2rem;
+    }
+
+    .object-item .status-icon.ready {
+      color: #0f9d58;
+    }
+
+    .object-item .status-icon.pending {
+      color: #f4b400;
+    }
+
+    .empty-state {
+      padding: 40px;
+      text-align: center;
+      color: #666;
+    }
+
+    .loading-state {
+      padding: 40px;
+      text-align: center;
+      color: #888;
+    }
+
+    .loading-state::after {
+      content: '';
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #0f3460;
+      border-top-color: #e94560;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .selected-object {
+      background: #0f3460;
+      padding: 16px;
+      border-radius: 6px;
+      margin-top: 16px;
+    }
+
+    .selected-object h3 {
+      color: #e94560;
+      margin-bottom: 12px;
+      font-size: 1rem;
+    }
+
+    .selected-object .detail-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 0.9rem;
+    }
+
+    .selected-object .detail-row .label {
+      color: #888;
+    }
+
+    .selected-object .detail-row .value {
+      color: #4ecdc4;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.8rem;
+      word-break: break-all;
+      text-align: right;
+      max-width: 60%;
+    }
+
+    .result {
+      margin-top: 16px;
+      padding: 16px;
+      background: #1a1a2e;
+      border-radius: 6px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 250px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    .result.show {
+      display: block;
+    }
+
+    .workflow-steps {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .workflow-step {
+      flex: 1;
+      min-width: 200px;
+      background: #0f3460;
+      padding: 16px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .workflow-step .number {
+      width: 32px;
+      height: 32px;
+      background: #e94560;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .workflow-step h4 {
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+
+    .workflow-step p {
+      font-size: 0.8rem;
+      color: #888;
+    }
+
+    .links {
+      display: flex;
+      gap: 16px;
+      margin-top: 30px;
+      flex-wrap: wrap;
+    }
+
+    .links a {
+      color: #e94560;
+      text-decoration: none;
+      padding: 8px 16px;
+      border: 1px solid #e94560;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+
+    .links a:hover {
+      background: #e94560;
+      color: white;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    .manifest-status {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+
+    .manifest-status.success {
+      background: rgba(15, 157, 88, 0.2);
+      border: 1px solid #0f9d58;
+    }
+
+    .manifest-status.pending {
+      background: rgba(244, 180, 0, 0.2);
+      border: 1px solid #f4b400;
+    }
+
+    .manifest-status.error {
+      background: rgba(233, 69, 96, 0.2);
+      border: 1px solid #e94560;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Potree BIM Demo</h1>
+    <p class="subtitle">APS Derivative Downloader & GLB Converter</p>
+
+    <div class="workflow-steps">
+      <div class="workflow-step">
+        <div class="number">1</div>
+        <h4>Select Object</h4>
+        <p>Choose from bucket</p>
+      </div>
+      <div class="workflow-step">
+        <div class="number">2</div>
+        <h4>Download</h4>
+        <p>Fetch SVF derivatives</p>
+      </div>
+      <div class="workflow-step">
+        <div class="number">3</div>
+        <h4>Convert</h4>
+        <p>Generate GLB</p>
+      </div>
+      <div class="workflow-step">
+        <div class="number">4</div>
+        <h4>View</h4>
+        <p>Open in Potree</p>
+      </div>
+    </div>
+
+    <!-- Bucket Browser -->
+    <div class="card">
+      <h2>
+        Browse Bucket Objects
+        <span class="badge">Step 1</span>
+      </h2>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="bucket-select">Select Bucket</label>
+          <select id="bucket-select">
+            <option value="">Loading buckets...</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex: 0; display: flex; align-items: flex-end;">
+          <button class="btn secondary" onclick="refreshBuckets()">Refresh</button>
+        </div>
+      </div>
+
+      <div class="objects-list" id="objects-list">
+        <div class="empty-state">Select a bucket to view objects</div>
+      </div>
+
+      <div class="selected-object" id="selected-object" style="display: none;">
+        <h3>Selected Object</h3>
+        <div class="detail-row">
+          <span class="label">Name:</span>
+          <span class="value" id="sel-name">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Size:</span>
+          <span class="value" id="sel-size">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">URN:</span>
+          <span class="value" id="sel-urn">-</span>
+        </div>
+        <div id="manifest-status"></div>
+        <div class="action-buttons">
+          <button class="btn" onclick="checkManifest()">Check Translation</button>
+          <button class="btn" onclick="startTranslation()" id="translate-btn" style="background: #ff9800;">Start Translation</button>
+        </div>
+        <div class="action-buttons" style="margin-top: 8px;">
+          <button class="btn success" onclick="downloadSelected()" id="download-selected-btn">Download Derivative</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Translation Section -->
+    <div class="card">
+      <h2>
+        Start Translation
+        <span class="badge">Step 1.5</span>
+      </h2>
+      <p style="color: #888; font-size: 0.9rem; margin-bottom: 16px;">
+        Start a translation job for a model in your bucket. This is required before downloading derivatives.
+      </p>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="translate-urn">URN to Translate</label>
+          <input type="text" id="translate-urn" placeholder="URN from bucket object">
+        </div>
+        <div class="form-group" style="width: 150px; flex: 0;">
+          <label for="translate-format">Format</label>
+          <select id="translate-format">
+            <option value="svf">SVF</option>
+            <option value="svf2">SVF2</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="action-buttons">
+        <button class="btn" onclick="startTranslationManual()" style="background: #ff9800;">Start Translation</button>
+        <button class="btn secondary" onclick="checkTranslationStatus()">Check Status</button>
+      </div>
+
+      <div class="result" id="translation-result"></div>
+    </div>
+
+    <!-- Download Progress -->
+    <div class="card">
+      <h2>
+        Download & Convert
+        <span class="badge">Steps 2-3</span>
+      </h2>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="download-urn">URN (from selection above or manual)</label>
+          <input type="text" id="download-urn" placeholder="Will be filled from selection">
+        </div>
+        <div class="form-group" style="width: 150px; flex: 0;">
+          <label for="prefer">Derivative</label>
+          <select id="prefer">
+            <option value="svf">SVF (for GLB)</option>
+            <option value="auto">Auto</option>
+            <option value="svf2">SVF2</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+          <input type="checkbox" id="auto-generate-svf" checked style="width: 18px; height: 18px;">
+          <label for="auto-generate-svf" style="margin: 0; cursor: pointer;">
+            Auto-generate SVF if only SVF2 available (triggers APS translation job)
+          </label>
+        </div>
+      </div>
+
+      <div class="action-buttons">
+        <button class="btn" id="start-download-btn" onclick="startDownload()">Start Download</button>
+        <button class="btn secondary" id="check-status-btn" onclick="checkDownloadStatus()" disabled>Check Status</button>
+      </div>
+
+      <div class="result" id="download-result"></div>
+
+      <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #0f3460;">
+        <h3 style="margin-bottom: 16px; color: #e94560;">Direct Conversion (Recommended)</h3>
+        <p style="color: #888; font-size: 0.9rem; margin-bottom: 16px;">
+          Converts directly from APS without manual download. Downloads all required SVF assets automatically.
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="convert-urn">URN for Direct Conversion</label>
+            <input type="text" id="convert-urn" placeholder="Model URN">
+          </div>
+          <div class="form-group" style="width: 150px; flex: 0;">
+            <label for="quality">Quality</label>
+            <select id="quality">
+              <option value="balanced">Balanced</option>
+              <option value="fast">Fast</option>
+              <option value="small">Small</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="action-buttons">
+          <button class="btn success" id="convert-btn" onclick="convertToGlb()">Convert to GLB (Direct)</button>
+        </div>
+
+        <div class="result" id="convert-result"></div>
+      </div>
+    </div>
+
+    <!-- View -->
+    <div class="card">
+      <h2>
+        Open Viewer
+        <span class="badge">Step 4</span>
+      </h2>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="view-urn">URN</label>
+          <input type="text" id="view-urn" placeholder="Model URN">
+        </div>
+        <div class="form-group">
+          <label for="view-run">Run ID</label>
+          <input type="text" id="view-run" placeholder="Conversion Run ID">
+        </div>
+      </div>
+
+      <div class="action-buttons">
+        <button class="btn" onclick="openViewer()">Open Potree Viewer</button>
+      </div>
+    </div>
+
+    <div class="links">
+      <a href="/viewer">Direct Viewer</a>
+      <a href="/health">Health Check</a>
+      <a href="/api/jobs">View Jobs</a>
+    </div>
+  </div>
+
+  <script>
+    let selectedObject = null;
+    let currentJobId = null;
+
+    async function refreshBuckets() {
+      const select = document.getElementById('bucket-select');
+      select.innerHTML = '<option value="">Loading...</option>';
+
+      try {
+        const response = await fetch('/api/buckets');
+        const data = await response.json();
+
+        if (data.buckets && data.buckets.length > 0) {
+          select.innerHTML = '<option value="">Select a bucket...</option>' +
+            data.buckets.map(b =>
+              `<option value="${b.bucketKey}">${b.bucketKey}</option>`
+            ).join('');
+        } else {
+          select.innerHTML = '<option value="">No buckets found</option>';
+        }
+      } catch (error) {
+        select.innerHTML = '<option value="">Error loading buckets</option>';
+        console.error('Failed to load buckets:', error);
+      }
+    }
+
+    async function loadObjects(bucketKey) {
+      const list = document.getElementById('objects-list');
+      list.innerHTML = '<div class="loading-state">Loading objects</div>';
+
+      try {
+        const response = await fetch(`/api/buckets/${encodeURIComponent(bucketKey)}/objects?all=true`);
+        const data = await response.json();
+
+        if (data.objects && data.objects.length > 0) {
+          list.innerHTML = data.objects.map(obj => `
+            <div class="object-item" onclick="selectObject(${JSON.stringify(obj).replace(/"/g, '&quot;')})">
+              <div class="info">
+                <div class="name">${escapeHtml(obj.objectKey)}</div>
+                <div class="meta">URN: ${obj.urn.substring(0, 30)}...</div>
+              </div>
+              <div class="size">${obj.sizeFormatted}</div>
+            </div>
+          `).join('');
+        } else {
+          list.innerHTML = '<div class="empty-state">No objects in this bucket</div>';
+        }
+      } catch (error) {
+        list.innerHTML = '<div class="empty-state">Error loading objects</div>';
+        console.error('Failed to load objects:', error);
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function selectObject(obj) {
+      selectedObject = obj;
+
+      document.querySelectorAll('.object-item').forEach(el => el.classList.remove('selected'));
+      event.currentTarget.classList.add('selected');
+
+      document.getElementById('selected-object').style.display = 'block';
+      document.getElementById('sel-name').textContent = obj.objectKey;
+      document.getElementById('sel-size').textContent = obj.sizeFormatted;
+      document.getElementById('sel-urn').textContent = obj.urn;
+      document.getElementById('manifest-status').innerHTML = '';
+
+      document.getElementById('download-urn').value = obj.urn;
+      document.getElementById('convert-urn').value = obj.urn;
+      document.getElementById('translate-urn').value = obj.urn;
+      document.getElementById('view-urn').value = obj.urn;
+    }
+
+    async function startTranslation() {
+      if (!selectedObject) {
+        alert('Please select an object first');
+        return;
+      }
+
+      const btn = document.getElementById('translate-btn');
+      const statusDiv = document.getElementById('manifest-status');
+
+      btn.disabled = true;
+      btn.textContent = 'Starting...';
+      statusDiv.innerHTML = '<div class="manifest-status pending">Starting translation job...</div>';
+
+      try {
+        const response = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            urn: selectedObject.urn,
+            outputFormat: 'svf',
+            views: ['2d', '3d']
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          statusDiv.innerHTML = `
+            <div class="manifest-status success">
+              <strong>✓ Translation job started</strong><br>
+              Result: ${data.result}<br>
+              <a href="javascript:checkManifest()">Check status</a>
+            </div>
+          `;
+        } else {
+          statusDiv.innerHTML = `
+            <div class="manifest-status error">
+              <strong>✗ Failed to start translation</strong><br>
+              ${data.error || data.message}
+            </div>
+          `;
+        }
+      } catch (error) {
+        statusDiv.innerHTML = `
+          <div class="manifest-status error">
+            <strong>✗ Error</strong><br>
+            ${error.message}
+          </div>
+        `;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Start Translation';
+      }
+    }
+
+    async function startTranslationManual() {
+      const urn = document.getElementById('translate-urn').value.trim();
+      const format = document.getElementById('translate-format').value;
+
+      if (!urn) {
+        alert('Please enter a URN');
+        return;
+      }
+
+      const resultEl = document.getElementById('translation-result');
+      resultEl.classList.add('show');
+      resultEl.textContent = 'Starting translation job...';
+
+      try {
+        const response = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            urn,
+            outputFormat: format,
+            views: ['2d', '3d']
+          })
+        });
+
+        const data = await response.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+
+        if (response.ok) {
+          pollTranslationStatus(urn);
+        }
+      } catch (error) {
+        resultEl.textContent = 'Error: ' + error.message;
+      }
+    }
+
+    async function checkTranslationStatus() {
+      const urn = document.getElementById('translate-urn').value.trim();
+
+      if (!urn) {
+        alert('Please enter a URN');
+        return;
+      }
+
+      const resultEl = document.getElementById('translation-result');
+      resultEl.classList.add('show');
+      resultEl.textContent = 'Checking status...';
+
+      try {
+        const response = await fetch(`/api/translate/${encodeURIComponent(urn)}/status`);
+        const data = await response.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        resultEl.textContent = 'Error: ' + error.message;
+      }
+    }
+
+    async function pollTranslationStatus(urn) {
+      const resultEl = document.getElementById('translation-result');
+
+      try {
+        const response = await fetch(`/api/translate/${encodeURIComponent(urn)}/status`);
+        const data = await response.json();
+
+        let statusText = JSON.stringify(data, null, 2);
+
+        if (data.status === 'inprogress') {
+          statusText += '\n\n⏳ Translation in progress... (auto-refreshing)';
+          resultEl.textContent = statusText;
+          setTimeout(() => pollTranslationStatus(urn), 5000);
+        } else if (data.status === 'success') {
+          statusText += '\n\n✓ Translation complete! Ready for download/conversion.';
+          resultEl.textContent = statusText;
+        } else {
+          resultEl.textContent = statusText;
+        }
+      } catch (error) {
+        console.error('Poll error:', error);
+      }
+    }
+
+    async function checkManifest() {
+      if (!selectedObject) return;
+
+      const statusDiv = document.getElementById('manifest-status');
+      statusDiv.innerHTML = '<div class="manifest-status pending">Checking translation status...</div>';
+
+      try {
+        const response = await fetch(`/api/manifest/${encodeURIComponent(selectedObject.urn)}`);
+
+        if (!response.ok) {
+          throw new Error('Manifest not found - model may need translation');
+        }
+
+        const manifest = await response.json();
+
+        if (manifest.status === 'success') {
+          const derivatives = manifest.derivatives.map(d => d.outputType).join(', ');
+          statusDiv.innerHTML = `
+            <div class="manifest-status success">
+              <strong>✓ Translation complete</strong><br>
+              Derivatives: ${derivatives}
+            </div>
+          `;
+        } else if (manifest.status === 'inprogress') {
+          statusDiv.innerHTML = `
+            <div class="manifest-status pending">
+              <strong>⏳ Translation in progress</strong><br>
+              Progress: ${manifest.progress || 'unknown'}
+            </div>
+          `;
+        } else {
+          statusDiv.innerHTML = `
+            <div class="manifest-status error">
+              <strong>✗ Translation status: ${manifest.status}</strong><br>
+              The model may need to be translated first.
+            </div>
+          `;
+        }
+      } catch (error) {
+        statusDiv.innerHTML = `
+          <div class="manifest-status error">
+            <strong>✗ Could not check translation</strong><br>
+            ${error.message}
+          </div>
+        `;
+      }
+    }
+
+    function downloadSelected() {
+      if (!selectedObject) return;
+      document.getElementById('download-urn').value = selectedObject.urn;
+      startDownload();
+    }
+
+    async function startDownload() {
+      const urn = document.getElementById('download-urn').value.trim();
+      const prefer = document.getElementById('prefer').value;
+      const autoGenerateSvf = document.getElementById('auto-generate-svf').checked;
+
+      if (!urn) {
+        alert('Please enter or select a URN');
+        return;
+      }
+
+      const btn = document.getElementById('start-download-btn');
+      const resultEl = document.getElementById('download-result');
+
+      btn.disabled = true;
+      btn.textContent = 'Starting...';
+      resultEl.classList.add('show');
+      resultEl.textContent = 'Starting download...\n(If SVF needs generation, this may take several minutes)';
+
+      try {
+        const response = await fetch('/api/download-derivative', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urn, prefer, autoGenerateSvf })
+        });
+
+        const data = await response.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+
+        if (data.jobId || data.downloadRunId) {
+          currentJobId = data.jobId || data.downloadRunId;
+          document.getElementById('view-run').value = currentJobId;
+          document.getElementById('check-status-btn').disabled = false;
+
+          pollDownloadStatus();
+        }
+      } catch (error) {
+        resultEl.textContent = 'Error: ' + error.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Start Download';
+      }
+    }
+
+    async function checkDownloadStatus() {
+      if (!currentJobId) return;
+
+      const resultEl = document.getElementById('download-result');
+      resultEl.classList.add('show');
+
+      try {
+        const response = await fetch(`/api/download-derivative/${currentJobId}/status`);
+        const data = await response.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        resultEl.textContent = 'Error: ' + error.message;
+      }
+    }
+
+    async function pollDownloadStatus() {
+      if (!currentJobId) return;
+
+      const resultEl = document.getElementById('download-result');
+
+      try {
+        const response = await fetch(`/api/download-derivative/${currentJobId}/status`);
+        const data = await response.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+
+        if (data.status === 'running' || data.status === 'pending') {
+          setTimeout(pollDownloadStatus, 2000);
+        } else if (data.status === 'completed') {
+          resultEl.textContent += '\n\n✓ Download complete! Ready to convert.';
+        }
+      } catch (error) {
+        console.error('Poll error:', error);
+      }
+    }
+
+    async function convertToGlb() {
+      const urn = document.getElementById('convert-urn').value.trim() || 
+                  document.getElementById('download-urn').value.trim();
+      const quality = document.getElementById('quality').value;
+
+      if (!urn) {
+        alert('Please enter a URN');
+        return;
+      }
+
+      const btn = document.getElementById('convert-btn');
+      const resultEl = document.getElementById('convert-result');
+
+      btn.disabled = true;
+      btn.textContent = 'Converting...';
+      resultEl.classList.add('show');
+      resultEl.textContent = 'Starting direct conversion from APS...\n(This downloads SVF assets and converts to GLB - may take several minutes)';
+
+      try {
+        const response = await fetch('/api/convert-to-glb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urn, quality })
+        });
+
+        const data = await response.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+
+        if (data.success) {
+          document.getElementById('view-urn').value = urn;
+          document.getElementById('view-run').value = data.runId;
+          resultEl.textContent += '\n\n✓ Conversion complete! Ready to view.';
+        }
+      } catch (error) {
+        resultEl.textContent = 'Error: ' + error.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Convert to GLB (Direct)';
+      }
+    }
+
+    function openViewer() {
+      const urn = document.getElementById('view-urn').value.trim();
+      const run = document.getElementById('view-run').value.trim();
+
+      if (!urn || !run) {
+        alert('Please enter URN and Run ID');
+        return;
+      }
+
+      const url = `/viewer?urn=${encodeURIComponent(urn)}&run=${encodeURIComponent(run)}`;
+      window.open(url, '_blank');
+    }
+
+    document.getElementById('bucket-select').addEventListener('change', (e) => {
+      const bucketKey = e.target.value;
+      if (bucketKey) {
+        loadObjects(bucketKey);
+      } else {
+        document.getElementById('objects-list').innerHTML =
+          '<div class="empty-state">Select a bucket to view objects</div>';
+      }
+      document.getElementById('selected-object').style.display = 'none';
+      selectedObject = null;
+    });
+
+    refreshBuckets();
+  </script>
+</body>
+</html>

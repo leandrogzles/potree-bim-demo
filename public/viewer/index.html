@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Potree + BIM Viewer</title>
+  
+  <!-- Potree Dependencies (local) -->
+  <script src="/libs/potree/Potree_1.8/libs/jquery/jquery-3.1.1.min.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/spectrum/spectrum.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/jquery-ui/jquery-ui.min.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/three.js/build/three.min.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/other/BinaryHeap.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/tween/tween.min.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/d3/d3.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/proj4/proj4.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/openlayers3/ol.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/i18next/i18next.js"></script>
+  <script src="/libs/potree/Potree_1.8/libs/jstree/jstree.js"></script>
+  
+  <!-- Potree Core -->
+  <script src="/libs/potree/Potree_1.8/build/potree/potree.js"></script>
+  
+  <!-- Potree CSS -->
+  <link rel="stylesheet" href="/libs/potree/Potree_1.8/libs/spectrum/spectrum.css">
+  <link rel="stylesheet" href="/libs/potree/Potree_1.8/libs/jquery-ui/jquery-ui.min.css">
+  <link rel="stylesheet" href="/libs/potree/Potree_1.8/libs/openlayers3/ol.css">
+  <link rel="stylesheet" href="/libs/potree/Potree_1.8/libs/jstree/themes/mixed/style.css">
+  <link rel="stylesheet" href="/libs/potree/Potree_1.8/build/potree/potree.css">
+  
+  <!-- GLTFLoader for BIM (compatible with Three.js r124 used by Potree 1.8) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.124.0/examples/js/loaders/GLTFLoader.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+
+    #potree_container {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      left: 0; top: 0;
+    }
+
+    #potree_render_area {
+      position: absolute;
+      left: 0; top: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #potree_sidebar_container {
+      position: absolute;
+      z-index: 100;
+      background: rgba(30, 30, 50, 0.95);
+      width: 320px;
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    #custom-panel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 320px;
+      background: rgba(30, 30, 50, 0.95);
+      border-radius: 8px;
+      z-index: 1000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #eee;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      max-height: calc(100vh - 20px);
+      overflow-y: auto;
+    }
+
+    #custom-panel .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: rgba(60, 60, 100, 0.5);
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    #custom-panel .panel-header h2 {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    #custom-panel .toggle-btn {
+      background: none;
+      border: none;
+      color: #eee;
+      font-size: 18px;
+      cursor: pointer;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #custom-panel.collapsed .panel-content { display: none; }
+
+    #custom-panel .panel-content {
+      padding: 12px 16px;
+    }
+
+    #custom-panel .section {
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    #custom-panel .section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+    }
+
+    #custom-panel .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #888;
+      margin-bottom: 10px;
+    }
+
+    #custom-panel .select-row {
+      margin-bottom: 8px;
+    }
+
+    #custom-panel label {
+      display: block;
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 4px;
+    }
+
+    #custom-panel select {
+      width: 100%;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(0,0,0,0.3);
+      color: #eee;
+      font-size: 12px;
+    }
+
+    #custom-panel .btn-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    #custom-panel .btn {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: none;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    #custom-panel .btn-primary {
+      background: #4a7fff;
+      color: white;
+    }
+    #custom-panel .btn-primary:hover { background: #3a6fee; }
+    #custom-panel .btn-primary:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    #custom-panel .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: #ddd;
+    }
+    #custom-panel .btn-secondary:hover { background: rgba(255,255,255,0.2); }
+
+    #custom-panel .btn-success {
+      background: #2d9a5d;
+      color: white;
+    }
+    #custom-panel .btn-success:hover { background: #248a4f; }
+
+    #custom-panel .btn-danger {
+      background: #c0392b;
+      color: white;
+    }
+    #custom-panel .btn-danger:hover { background: #a93226; }
+
+    #custom-panel .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    #custom-panel .info-row .label { color: #888; }
+    #custom-panel .info-row .value { color: #ddd; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
+    #custom-panel .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    #custom-panel .slider-row {
+      margin-bottom: 12px;
+    }
+
+    #custom-panel .slider-row label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    #custom-panel .slider-row input[type="range"] {
+      width: 100%;
+    }
+
+    #custom-panel .nudge-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    #custom-panel .axis-label {
+      font-size: 11px;
+      font-weight: bold;
+      width: 30px;
+    }
+    #custom-panel .axis-label.x { color: #ff6666; }
+    #custom-panel .axis-label.y { color: #66ff66; }
+    #custom-panel .axis-label.z { color: #6666ff; }
+    #custom-panel .axis-label.rot { color: #ffcc66; }
+
+    #custom-panel .value-display {
+      font-family: monospace;
+      font-size: 11px;
+      width: 60px;
+      text-align: right;
+    }
+
+    #custom-panel .value-input {
+      font-family: monospace;
+      font-size: 11px;
+      width: 70px;
+      text-align: right;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 3px;
+      color: #ddd;
+      padding: 2px 4px;
+    }
+
+    #custom-panel .value-input:focus {
+      outline: none;
+      border-color: #4a7fff;
+      background: rgba(0,0,0,0.5);
+    }
+
+    #custom-panel .value-input::-webkit-inner-spin-button,
+    #custom-panel .value-input::-webkit-outer-spin-button {
+      opacity: 0.5;
+    }
+
+    #custom-panel .nudge-btn {
+      width: 28px !important;
+      height: 28px;
+      padding: 0 !important;
+      flex: none !important;
+      font-size: 14px !important;
+    }
+
+    #custom-panel #status-container {
+      min-height: 20px;
+    }
+
+    #custom-panel .status-message {
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    #custom-panel .status-message.success { background: rgba(46, 204, 113, 0.2); color: #2ecc71; }
+    #custom-panel .status-message.error { background: rgba(231, 76, 60, 0.2); color: #e74c3c; }
+    #custom-panel .status-message.info { background: rgba(52, 152, 219, 0.2); color: #3498db; }
+    #custom-panel .status-message.warning { background: rgba(241, 196, 15, 0.2); color: #f1c40f; }
+
+    .loading-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    .loading-overlay.hidden { display: none; }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid rgba(255,255,255,0.3);
+      border-top-color: #4a7fff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      margin-top: 16px;
+      color: #eee;
+      font-size: 14px;
+    }
+
+    .error-banner {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #c0392b;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      z-index: 10000;
+      max-width: 500px;
+      text-align: center;
+    }
+
+    .error-banner.hidden { display: none; }
+
+    #debug-log {
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 10px;
+      background: rgba(0,0,0,0.5);
+      padding: 8px;
+      border-radius: 4px;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    #debug-log .log-entry { margin-bottom: 2px; }
+    #debug-log .log-entry.error { color: #e74c3c; }
+    #debug-log .log-entry.success { color: #2ecc71; }
+    #debug-log .log-entry.info { color: #3498db; }
+  </style>
+</head>
+<body>
+  <div id="potree_container">
+    <div id="potree_render_area"></div>
+    <div id="potree_sidebar_container"></div>
+  </div>
+
+  <div id="custom-panel">
+    <div class="panel-header" onclick="window.togglePanel()">
+      <h2>BIM + Point Cloud Controls</h2>
+      <button class="toggle-btn" id="toggle-btn">−</button>
+    </div>
+
+    <div class="panel-content">
+      <!-- Data Selection -->
+      <div class="section">
+        <div class="section-title">Data Selection</div>
+        
+        <div class="select-row">
+          <label for="cloud-select">Point Cloud:</label>
+          <select id="cloud-select">
+            <option value="">-- No Point Cloud --</option>
+          </select>
+        </div>
+        
+        <div class="select-row">
+          <label for="bim-select">BIM Model:</label>
+          <select id="bim-select">
+            <option value="">-- No BIM Model --</option>
+          </select>
+        </div>
+
+        <div class="btn-row" style="margin-top: 12px;">
+          <button class="btn btn-primary" id="btn-load">Load Selected</button>
+          <button class="btn btn-secondary" id="btn-refresh">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Status Section -->
+      <div class="section">
+        <div class="section-title">Status</div>
+        <div class="info-row">
+          <span class="label">Cloud:</span>
+          <span class="value" id="info-cloud">Not loaded</span>
+        </div>
+        <div class="info-row">
+          <span class="label">BIM:</span>
+          <span class="value" id="info-bim">Not loaded</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Points:</span>
+          <span class="value" id="info-points">-</span>
+        </div>
+      </div>
+
+      <!-- Point Cloud Settings -->
+      <div class="section">
+        <div class="section-title">Point Cloud Settings</div>
+        
+        <div class="slider-row">
+          <label>
+            <span>Point Budget</span>
+            <span class="value" id="budget-value">2.0M</span>
+          </label>
+          <input type="range" id="point-budget" min="0.5" max="10" step="0.5" value="2">
+        </div>
+
+        <div class="slider-row">
+          <label>
+            <span>Point Size</span>
+            <span class="value" id="point-size-value">1.0</span>
+          </label>
+          <input type="range" id="point-size" min="0.1" max="5" step="0.1" value="1">
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="edl-enabled" checked>
+          <label for="edl-enabled">Eye-Dome Lighting (EDL)</label>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="show-cloud" checked>
+          <label for="show-cloud">Show Point Cloud</label>
+        </div>
+      </div>
+
+      <!-- BIM Settings -->
+      <div class="section">
+        <div class="section-title">BIM Settings</div>
+        
+        <div class="checkbox-row">
+          <input type="checkbox" id="show-bim" checked>
+          <label for="show-bim">Show BIM Model</label>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="force-unlit">
+          <label for="force-unlit">Force Unlit (debug lighting)</label>
+        </div>
+
+        <div class="slider-row">
+          <label>
+            <span>BIM Opacity</span>
+            <span class="value" id="bim-opacity-value">100%</span>
+          </label>
+          <input type="range" id="bim-opacity" min="0" max="100" value="100">
+        </div>
+
+        <div class="select-row">
+          <label for="bim-units">BIM Units:</label>
+          <select id="bim-units">
+            <option value="m" selected>Meters (m)</option>
+            <option value="mm">Millimeters (mm)</option>
+            <option value="cm">Centimeters (cm)</option>
+            <option value="ft">Feet (ft)</option>
+            <option value="in">Inches (in)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Camera Controls -->
+      <div class="section">
+        <div class="section-title">Camera</div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-focus-cloud">Focus Cloud</button>
+          <button class="btn btn-secondary" id="btn-focus-bim">Focus BIM</button>
+        </div>
+        <div class="btn-row" style="margin-top: 8px;">
+          <button class="btn btn-secondary" id="btn-focus-both">Focus All</button>
+          <button class="btn btn-secondary" id="btn-reset-camera">Reset View</button>
+        </div>
+      </div>
+
+      <!-- BIM Transform -->
+      <div class="section">
+        <div class="section-title">BIM Transform</div>
+
+        <div class="nudge-controls">
+          <span class="axis-label x">X</span>
+          <input type="number" step="0.01" class="value-input" id="pos-x" value="0.00">
+          <button class="btn btn-secondary nudge-btn" data-axis="x" data-dir="-1">−</button>
+          <button class="btn btn-secondary nudge-btn" data-axis="x" data-dir="1">+</button>
+        </div>
+
+        <div class="nudge-controls">
+          <span class="axis-label y">Y</span>
+          <input type="number" step="0.01" class="value-input" id="pos-y" value="0.00">
+          <button class="btn btn-secondary nudge-btn" data-axis="y" data-dir="-1">−</button>
+          <button class="btn btn-secondary nudge-btn" data-axis="y" data-dir="1">+</button>
+        </div>
+
+        <div class="nudge-controls">
+          <span class="axis-label z">Z</span>
+          <input type="number" step="0.01" class="value-input" id="pos-z" value="0.00">
+          <button class="btn btn-secondary nudge-btn" data-axis="z" data-dir="-1">−</button>
+          <button class="btn btn-secondary nudge-btn" data-axis="z" data-dir="1">+</button>
+        </div>
+
+        <div class="nudge-controls">
+          <span class="axis-label x">RotX</span>
+          <input type="number" step="0.1" class="value-input" id="rot-x" value="0.0">
+          <button class="btn btn-secondary nudge-btn" data-rot="x" data-dir="-1">−</button>
+          <button class="btn btn-secondary nudge-btn" data-rot="x" data-dir="1">+</button>
+        </div>
+
+        <div class="nudge-controls">
+          <span class="axis-label y">RotY</span>
+          <input type="number" step="0.1" class="value-input" id="rot-y" value="0.0">
+          <button class="btn btn-secondary nudge-btn" data-rot="y" data-dir="-1">−</button>
+          <button class="btn btn-secondary nudge-btn" data-rot="y" data-dir="1">+</button>
+        </div>
+
+        <div class="nudge-controls">
+          <span class="axis-label z">RotZ</span>
+          <input type="number" step="0.1" class="value-input" id="rot-z" value="0.0">
+          <button class="btn btn-secondary nudge-btn" data-rot="z" data-dir="-1">−</button>
+          <button class="btn btn-secondary nudge-btn" data-rot="z" data-dir="1">+</button>
+        </div>
+
+        <div class="nudge-controls">
+          <span class="axis-label" style="color: #cc66ff;">Scale</span>
+          <input type="number" step="0.0001" class="value-input" id="scale-display" value="1.0000">
+          <button class="btn btn-secondary nudge-btn" data-scale="-1">−</button>
+          <button class="btn btn-secondary nudge-btn" data-scale="1">+</button>
+        </div>
+
+        <div class="slider-row" style="margin-top: 8px;">
+          <label>
+            <span>Step Size</span>
+            <span class="value" id="step-value">0.1m / 5°</span>
+          </label>
+          <input type="range" id="step-size" min="1" max="3" step="1" value="2">
+        </div>
+
+        <div class="btn-row" style="margin-top: 12px;">
+          <button class="btn btn-primary" id="btn-auto-align">Auto-Align</button>
+          <button class="btn btn-secondary" id="btn-reset-transform">Reset</button>
+        </div>
+        <div class="btn-row" style="margin-top: 8px;">
+          <button class="btn btn-success" id="btn-save-alignment">Save Alignment</button>
+        </div>
+      </div>
+
+      <!-- Debug Section -->
+      <div class="section">
+        <div class="section-title">Debug / Diagnostics</div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-debug-cloud">Run Diagnostics</button>
+          <button class="btn btn-secondary" id="btn-clear-log">Clear Log</button>
+        </div>
+        <div style="font-size: 10px; color: #666; margin-top: 6px;">
+          Keys: D=diagnostics, U=toggle unlit, F=focus all
+        </div>
+        <div id="debug-log" style="margin-top: 8px;"></div>
+      </div>
+
+      <!-- Messages -->
+      <div id="status-container"></div>
+    </div>
+  </div>
+
+  <div class="loading-overlay hidden" id="loading-overlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loading-text">Loading...</div>
+  </div>
+
+  <div class="error-banner hidden" id="error-banner"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

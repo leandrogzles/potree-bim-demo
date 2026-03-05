@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables
+.env
+.env.local
+
+# Downloaded and generated data
+data/downloads/
+data/converted/
+data/converted-ifc/
+data/pointclouds/*
+!data/pointclouds/README.md
+data/pointclouds_raw/*
+!data/pointclouds_raw/README.md
+data/pointclouds_cache/
+data/alignment/
+data/ifc/
+
+# External libraries (download via script)
+public/libs/potree/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
